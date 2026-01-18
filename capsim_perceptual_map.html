@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Capsim Perceptual Map</title>
+
+<style>
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Roboto, Inter, Helvetica, Arial, sans-serif;
+  background: #f4f6f9;
+  padding: 30px;
+  color: #1f2937;
+}
+
+h2 { font-weight: 600; }
+
+.container {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+  max-width: 1000px;
+}
+
+.controls, .product-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+label { font-size: 13px; font-weight: 500; }
+
+input, select, textarea {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+}
+
+input, select { width: 95px; }
+
+button {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+button.secondary { background: #6b7280; }
+button.danger { background: #dc2626; }
+
+canvas {
+  border-radius: 12px;
+  background: #fafafa;
+  border: 1px solid #e5e7eb;
+}
+
+.product-card {
+  background: #f9fafb;
+  padding: 8px 10px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+textarea {
+  width: 100%;
+  height: 70px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+<h2>Capsim Foundation – Perceptual Map</h2>
+
+<div class="controls">
+  <label>Round
+    <select id="round" onchange="draw(); saveState();">
+      <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+      <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+      <option value="7">7</option><option value="8">8</option>
+    </select>
+  </label>
+
+  <label>Month
+    <select id="month" onchange="draw(); saveState();">
+      <option value="0">January</option><option value="1">February</option>
+      <option value="2">March</option><option value="3">April</option>
+      <option value="4">May</option><option value="5">June</option>
+      <option value="6">July</option><option value="7">August</option>
+      <option value="8">September</option><option value="9">October</option>
+      <option value="10">November</option><option value="11">December</option>
+    </select>
+  </label>
+
+  <button onclick="toggleLowTech()">Low Tech</button>
+  <button onclick="toggleHighTech()">High Tech</button>
+  <button onclick="toggleCoords()">Coords</button>
+</div>
+
+<h3>Products</h3>
+<div class="product-controls">
+  <input id="newPerf" type="number" step="0.1" placeholder="Performance">
+  <input id="newSize" type="number" step="0.1" placeholder="Size">
+  <button onclick="addProduct()">Add Product</button>
+</div>
+
+<div id="productList"></div>
+
+<h3>Save / Share</h3>
+<div class="controls">
+  <button onclick="exportData()">Export Setup</button>
+  <button class="secondary" onclick="importData()">Import Setup</button>
+</div>
+<textarea id="importBox" placeholder="Paste exported data here"></textarea>
+
+<canvas id="map" width="650" height="650"></canvas>
+</div>
+
+<script>
+// ================= DATA =================
+const lowTech = [
+  {p:4.1,s:15.6},{p:4.6,s:15.1},{p:5.1,s:14.6},{p:5.6,s:14.1},
+  {p:6.1,s:13.6},{p:6.6,s:13.1},{p:7.1,s:12.6},{p:7.6,s:12.1}
+];
+const highTech = [
+  {p:5.3,s:14.4},{p:6.0,s:13.7},{p:6.7,s:13.0},{p:7.4,s:12.3},
+  {p:8.1,s:11.6},{p:8.8,s:10.9},{p:9.5,s:10.2},{p:10.2,s:9.5}
+];
+
+const FINE=2.5, ROUGH=4.0, HT_OFFSET=1.4;
+const LT_MOVE=0.5/12, HT_MOVE=0.7/12;
+const SCALE=25, OFFSET=50;
+
+let showLowTech=true, showHighTech=true, showCoords=false;
+let products=[];
+const colors=["green","purple","teal","brown","black"];
+let colorIndex=0;
+
+// ================= HELPERS =================
+function sx(x){return OFFSET+x*SCALE;}
+function sy(y){return 600-y*SCALE;}
+
+// ================= SAVE / LOAD =================
+function saveState(){
+  localStorage.setItem("capsimState", JSON.stringify({
+    products, showLowTech, showHighTech, showCoords,
+    round: round.value, month: month.value
+  }));
+}
+
+function loadState(){
+  const saved=localStorage.getItem("capsimState");
+  if(!saved) return;
+  const s=JSON.parse(saved);
+  products=s.products||[];
+  showLowTech=s.showLowTech??true;
+  showHighTech=s.showHighTech??true;
+  showCoords=s.showCoords??false;
+  round.value=s.round||1;
+  month.value=s.month||0;
+  renderProducts();
+}
+
+// ================= PRODUCTS =================
+function addProduct(){
+  const p=parseFloat(newPerf.value), s=parseFloat(newSize.value);
+  if(isNaN(p)||isNaN(s)) return;
+  products.push({perf:p,size:s,color:colors[colorIndex++%colors.length],visible:true});
+  renderProducts(); saveState(); draw();
+}
+
+function toggleProduct(i){products[i].visible=!products[i].visible; saveState(); draw();}
+function removeProduct(i){products.splice(i,1); renderProducts(); saveState(); draw();}
+
+function renderProducts(){
+  productList.innerHTML="";
+  products.forEach((pr,i)=>{
+    productList.innerHTML+=`
+      <div class="product-card">
+        <span style="color:${pr.color}">●</span>
+        (${pr.perf.toFixed(2)}, ${pr.size.toFixed(2)})
+        <button class="secondary" onclick="toggleProduct(${i})">Toggle</button>
+        <button class="danger" onclick="removeProduct(${i})">Remove</button>
+      </div>`;
+  });
+}
+
+// ================= EXPORT / IMPORT =================
+function exportData(){
+  const data=JSON.stringify({products,round:round.value,month:month.value});
+  navigator.clipboard.writeText(data);
+  alert("Setup copied to clipboard!");
+}
+
+function importData(){
+  try{
+    const data=JSON.parse(importBox.value);
+    products=data.products||[];
+    round.value=data.round||1;
+    month.value=data.month||0;
+    renderProducts(); saveState(); draw();
+  }catch{
+    alert("Invalid data");
+  }
+}
+
+// ================= TOGGLES =================
+function toggleLowTech(){showLowTech=!showLowTech; saveState(); draw();}
+function toggleHighTech(){showHighTech=!showHighTech; saveState(); draw();}
+function toggleCoords(){showCoords=!showCoords; saveState(); draw();}
+
+// ================= DRAW =================
+function draw(){
+  const r=round.value-1, m=month.value;
+  const ctx=map.getContext("2d");
+  ctx.clearRect(0,0,650,650);
+
+  ctx.setLineDash([4,4]); ctx.strokeStyle="#ddd";
+  for(let i=0;i<=20;i++){
+    ctx.beginPath();ctx.moveTo(sx(i),OFFSET);ctx.lineTo(sx(i),600);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(OFFSET,sy(i));ctx.lineTo(600,sy(i));ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  ctx.strokeStyle="#000";
+  ctx.beginPath();ctx.moveTo(OFFSET,600);ctx.lineTo(600,600);
+  ctx.moveTo(OFFSET,600);ctx.lineTo(OFFSET,OFFSET);ctx.stroke();
+
+  if(showLowTech){
+    const p=lowTech[r].p+LT_MOVE*m, s=lowTech[r].s-LT_MOVE*m;
+    ctx.strokeStyle="blue";
+    ctx.beginPath();ctx.arc(sx(p),sy(s),FINE*SCALE,0,Math.PI*2);ctx.stroke();
+    ctx.setLineDash([6,4]);
+    ctx.beginPath();ctx.arc(sx(p),sy(s),ROUGH*SCALE,0,Math.PI*2);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  if(showHighTech){
+    const p=highTech[r].p+HT_MOVE*m, s=highTech[r].s-HT_MOVE*m;
+    ctx.strokeStyle="red";
+    ctx.beginPath();ctx.arc(sx(p),sy(s),FINE*SCALE,0,Math.PI*2);ctx.stroke();
+    ctx.setLineDash([6,4]);
+    ctx.beginPath();ctx.arc(sx(p),sy(s),ROUGH*SCALE,0,Math.PI*2);ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle="orange";
+    ctx.beginPath();ctx.arc(sx(p+HT_OFFSET),sy(s-HT_OFFSET),4,0,Math.PI*2);ctx.fill();
+  }
+
+  products.forEach(pr=>{
+    if(!pr.visible) return;
+    ctx.fillStyle=pr.color;
+    ctx.beginPath();ctx.arc(sx(pr.perf),sy(pr.size),5,0,Math.PI*2);ctx.fill();
+  });
+}
+
+loadState();
+draw();
+</script>
+
+</body>
+</html>
